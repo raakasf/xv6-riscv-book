@@ -73,7 +73,7 @@ room in the PTE format for the physical page number to grow by another
 technology predictions.  $2^{39}$ bytes is 512 GB, which should be
 enough address space for applications running on RISC-V
 computers. $2^{56}$ is enough physical memory space for the near
-future to fit many I/O devices and DRAM chips. If
+future to fit many I/O devices and RAM chips. If
 more is needed, the RISC-V designers have defined Sv48 with 48-bit
 virtual addresses~\cite{riscv:priv}.
 
@@ -151,22 +151,25 @@ Each CPU has its own \texttt{satp} so that different CPUs can run
 different processes, each with a private address space described by
 its own page table.
 
-Typically a kernel maps all of physical memory into its page table so
-that it can read and write any location in physical memory using
-load/store instructions.  Since the page directories are in physical
-memory, the kernel can program the content of a PTE in a page
-directory by writing to the virtual address of the PTE using a
-standard store instruction.
+From the kernel's point of view, a page table is data stored in
+memory, and the kernel creates and modifies page tables using code
+much like you might see for any tree-shaped data structure.
 
-A few notes about terms.
-Physical memory refers to storage cells in DRAM.
-A byte of physical memory has an address, called a physical address.
-Instructions use only virtual addresses, which the
-paging hardware translates to physical addresses, and then
-sends to the DRAM hardware to read or write storage.
-Unlike physical memory and virtual addresses, virtual memory isn't a physical object, but refers to the collection of abstractions and mechanisms
-the kernel provides to manage physical memory and virtual
-addresses.
+A few notes about terms used in this book. \textit{Physical memory}
+refers to storage cells in RAM. A byte of physical memory has an
+address, called a \textit{physical address}. Instructions that
+dereference addresses (such as loads, stores, jumps, and function calls)
+use only
+virtual addresses, which the paging hardware translates to physical
+addresses, and then sends to the RAM hardware to read or write
+storage. An \textit{address space} is the set of virtual addresses
+that are valid in a given page table; each xv6 process has a separate
+user address space, and the xv6 kernel has its own address space as
+well. \textit{User memory} refers to a process's user address space
+plus the physical memory that the page table allows the process to
+access. \textit{Virtual memory} refers to the ideas and techniques
+associated with managing page tables and using them to achieve goals
+such as isolation.
 
 \begin{figure}[h]
 \centering
@@ -353,12 +356,16 @@ mimics the RISC-V paging hardware as it
 looks up the PTE for a virtual address (see
 Figure~\ref{fig:riscv_pagetable}).
 \lstinline{walk}
-descends the 3-level page table 9 bits at the time.
-It uses each level's 9 bits of virtual address to find
-the PTE of either the next-level page table or the final page
+descends the page table one level at a time,
+using each level's 9 bits of virtual address to
+index into the relevant page directory page.
+At each level it finds either the PTE of the
+next level's page directory page, or the PTE of
+final page
 \lineref{kernel/vm.c:/pte.=..pagetable/}.
-If the PTE isn't valid, then
-the required page hasn't yet been allocated;
+If a PTE in a first or second level page directory
+page isn't valid, then the required directory page
+hasn't yet been allocated;
 if the
 \lstinline{alloc}
 argument is set,
@@ -384,7 +391,7 @@ It writes the physical address of the root page-table page
 into the register
 \texttt{satp}.
 After this the CPU will translate addresses using the kernel
-page table.  Since the kernel uses an identity mapping, the now
+page table.  Since the kernel uses a direct mapping, the now
 virtual address of the next instruction will map to the right physical
 memory address.
 
@@ -501,8 +508,6 @@ structure stored in each page);
 this dual use of addresses is the main reason that the
 allocator code is full of C type casts.
 \index{type cast}
-The other reason is that freeing and allocation inherently
-change the type of the memory.
 
 The function
 \lstinline{kfree}
@@ -530,7 +535,7 @@ removes and returns the first element in the free list.
 
 \section{Process address space}
 
-Each process has a separate page table, and when xv6 switches between
+Each process has its own page table, and when xv6 switches between
 processes, it also changes page tables.
 Figure~\ref{fig:processlayout} shows a process's address space in more
 detail than Figure~\ref{fig:as}.  A process's user memory starts at
@@ -614,7 +619,7 @@ all address spaces, but can be used only by the kernel.
 
 \begin{figure}[t]
 \center
-\includegraphics[scale=0.5]{fig/processlayout.pdf}
+\includegraphics[scale=0.5]{fig/processlayout.png}
 \caption{A process's user address space, with its initial stack.}
 \label{fig:processlayout}
 \end{figure}
@@ -631,7 +636,7 @@ call is implemented by the function
 or negative.
 \lstinline{uvmalloc}
 \lineref{kernel/vm.c:/^uvmalloc/}
-allocates physical memory with {\tt kalloc},
+allocates physical memory with {\tt kalloc}, zeros the allocated memory,
 and adds PTEs to the user page table with {\tt mappages}.
 \lstinline{uvmdealloc} calls
 {\tt uvmunmap}
@@ -761,13 +766,10 @@ It places a null pointer at the end of what will be the
 \indexcode{argv}
 list passed to
 \lstinline{main}.
-The first three entries in
-\lstinline{ustack}
-are the fake return program counter,
-\indexcode{argc},
-and
-\lstinline{argv}
-pointer.
+The values for \indexcode{argc} and \lstinline{argv} are passed to \lstinline{main}
+through the system-call return path:  \lstinline{argc} is passed via the
+system call return value, which goes in {\tt a0}, and \lstinline{argv} is passed through
+the {\tt a1} entry of the process's trapframe.
 
 \lstinline{exec}
 places an inaccessible page just below the stack page,
@@ -852,10 +854,10 @@ Chapter~\ref{CH:TRAP}.
 
 Xv6 is simplified by the kernel's use of a direct map between virtual
 and physical addresses, and by its assumption that there is physical
-RAM at address 0x8000000, where the kernel expects to be loaded. This
+RAM at address 0x80000000, where the kernel expects to be loaded. This
 works with QEMU, but on real hardware it turns out to be a bad idea;
 real hardware places RAM and devices at unpredictable physical
-addresses, so that (for example) there might be no RAM at 0x8000000,
+addresses, so that (for example) there might be no RAM at 0x80000000,
 where xv6 expect to be able to store the kernel. More serious kernel
 designs exploit the page table to turn arbitrary hardware physical
 memory layouts into predictable kernel virtual address layouts.

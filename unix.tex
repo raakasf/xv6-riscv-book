@@ -142,7 +142,7 @@ int kill(int pid) & Terminate process PID. Returns 0, or -1 for error. \\
 int getpid() & Return the current process's PID. \\
 int sleep(int n) & Pause for n clock ticks. \\
 int exec(char *file, char *argv[]) & Load a file and execute it with arguments; only returns if error. \\
-char *sbrk(int n) & Grow process's memory by n bytes. Returns start of new memory. \\
+char *sbrk(int n) & Grow process's memory by n zero bytes. Returns start of new memory. \\
 int open(char *file, int flags) & Open a file; flags indicate read/write; returns an fd (file descriptor). \\
 int write(int fd, char *buf, int n) & Write n bytes from buf to file descriptor fd; returns n. \\
 int read(int fd, char *buf, int n) & Read n bytes into buf; returns number read; or 0 if end of file. \\
@@ -153,7 +153,6 @@ int chdir(char *dir) & Change the current directory. \\
 int mkdir(char *dir) & Create a new directory. \\
 int mknod(char *file, int, int) & Create a device file. \\
 int fstat(int fd, struct stat *st) & Place info about an open file into *st. \\
-int stat(char *file, struct stat *st) & Place info about a named file into *st. \\
 int link(char *file1, char *file2) & Create another name (file2) for the file file1. \\
 int unlink(char *file) & Remove a file. \\
 \end{tabular}
@@ -167,8 +166,8 @@ A process may create a new process using the
 system call.
 \lstinline{fork}
 gives the new process an exact copy of the calling
-process's memory,
-both instructions and data.
+process's memory: it copies the instructions, data, and
+stack of the calling process into the new process's memory.
 \lstinline{fork}
 returns in both the original and new processes.
 In the original process, \lstinline{fork} returns the new process's
@@ -349,7 +348,7 @@ A process that needs more memory at run-time (perhaps for
 can call
 \lstinline{sbrk(n)}
 to grow its data memory by
-\lstinline{n}
+\lstinline{n} zero
 bytes;
 \indexcode{sbrk}
 returns the location of the new memory.

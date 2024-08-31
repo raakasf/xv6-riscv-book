@@ -244,6 +244,7 @@ file system uses locks on buffers for synchronization.
 \lstinline{bget}
 ensures this invariant by holding the
 \lstinline{bache.lock}
+\lstinline{bcache.lock}
 continuously from the first loop's check of whether the
 block is cached through the second loop's declaration that
 the block is now cached (by setting
@@ -866,13 +867,6 @@ no links to it and
 is one. That one reference is the reference owned by the
 thread calling
 \lstinline{iput}.
-It's true that 
-\lstinline{iput}
-checks that the reference count is one outside of its
-\lstinline{itable.lock}
-critical section, but at that point the link
-count is known to be zero, so no thread will try
-to acquire a new reference.
 The other main danger is that a concurrent call to
 \lstinline{ialloc}
 might choose the same inode that
@@ -1071,11 +1065,11 @@ writes that start at or cross the end of the file
 grow the file, up to the maximum file size
 \linerefs{kernel/fs.c:/^..if.off.\+.n.>.MAXFILE/,/./};
 the loop copies data into the buffers instead of out
-\lineref{kernel/fs.c:/memmove.*bp->data/};
+\lineref{kernel/fs.c:/either.copyin.*bp->data/};
 and if the write has extended the file,
 \indexcode{writei}
 must update its size
-\linerefs{kernel/fs.c:/^..if.n.>.0./,/^..}/}.
+\linerefs{kernel/fs.c:/^..if.off.>.ip->size\)/,/./}.
 
 %% Both
 %% \indexcode{readi}
@@ -1170,7 +1164,7 @@ returns an error
 \linerefs{kernel/fs.c:/Check.that.name.is.not.present/,/^..}/}.
 The main loop reads directory entries looking for an unallocated entry.
 When it finds one, it stops the loop early
-\linerefs{kernel/fs.c:/^....if.de.inum.==.0/,/./},
+\linerefs{kernel/fs.c:/Look for an empty dirent/,/.*break/},
 with 
 \lstinline{off}
 set to the offset of the available entry.
@@ -1183,7 +1177,7 @@ Either way,
 then adds a new entry to the directory
 by writing at offset
 \lstinline{off}
-\linerefs{kernel/fs.c:/^..strncpy/,/panic/}.
+\linerefs{kernel/fs.c:/if.writei/,/return -1/}.
 %% 
 %% 
 %% 

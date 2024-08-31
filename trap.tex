@@ -45,8 +45,8 @@ and the system call or device-driver service routine. While
 commonality among the three trap types suggests that a kernel could
 handle all traps with a single code path, it turns out to be
 convenient to have separate code for
-three distinct cases: traps from user space, traps from kernel space,
-and timer interrupts. Kernel code (assembler or C) that
+two distinct cases: traps from user space, and traps from kernel space.
+Kernel code (assembler or C) that
 processes a trap is often called a \indextext{handler};
 the first handler instructions are usually written in assembler
 (rather than C) and are sometimes called a \indextext{vector}.
@@ -89,15 +89,13 @@ the reason for the trap.
 \end{itemize}
 
 The above registers relate to traps handled in supervisor mode, and they
-cannot be read or written in user mode. There is a similar set of
-control registers for traps handled in machine mode; xv6 uses
-them only for the special case of timer interrupts.
+cannot be read or written in user mode.
 
 Each CPU on a multi-core chip has its own set of these registers,
 and more than one CPU may be handling a trap at any given time.
 
 When it needs to force a trap, the RISC-V hardware does the
-following for all trap types (other than timer interrupts):
+following for all trap types:
 
 \begin{enumerate}
 
@@ -186,7 +184,7 @@ be above memory that programs use for themselves.
 The trampoline page is also mapped at address {\tt TRAMPOLINE}
 in the kernel page table. See Figure~\ref{fig:as} and
 Figure~\ref{fig:xv6_layout}. Because the trampoline page is mapped in
-the user page table, without the {\tt PTE\_U} flag, traps can start
+the user page table, traps can start
 executing there in supervisor mode. Because the trampoline page is
 mapped at the same address in the kernel address space, the trap handler
 can continue to execute after it switches to the kernel page
@@ -196,8 +194,8 @@ The code for the {\tt uservec} trap handler is in {\tt trampoline.S}
 \lineref{kernel/trampoline.S:/^uservec/}.
 When {\tt uservec} starts, all 32 registers contain values owned by
 the interrupted user code. These 32 values need to be saved somewhere
-in memory, so that
-they can be restored when the trap returns to user space.
+in memory, so that later on
+the kernel can restore them before returning to user space.
 Storing to memory requires use of a register
 to hold the address,
 but at this point there are no general-purpose registers available!
@@ -231,7 +229,7 @@ kernel stack, the current CPU's hartid, the address of the {\tt usertrap}
 function,
 and the address of the kernel page table. {\tt uservec}
 retrieves these values, switches {\tt satp} to the kernel page table,
-and calls {\tt usertrap}.
+and jumps to {\tt usertrap}.
 
 The job of {\tt usertrap} is to determine
 the cause of the trap, process it, and return
@@ -259,10 +257,12 @@ killed or should yield the CPU (if this trap is a timer interrupt).
 The first step in returning to user space is the call to {\tt usertrapret}
 \lineref{kernel/trap.c:/^usertrapret/}.
 This function sets up the RISC-V control registers to prepare for a
-future trap from user space. This involves changing {\tt stvec}
-to refer to {\tt uservec}, preparing the trapframe fields that
-{\tt uservec} relies on, and setting {\tt sepc} to the previously
-saved user program counter. At the end, {\tt usertrapret}
+future trap from user space: setting {\tt stvec}
+to {\tt uservec} and preparing the trapframe fields that
+{\tt uservec} relies on.
+{\tt usertrapret} sets {\tt sepc} to the previously
+saved user program counter.
+At the end, {\tt usertrapret}
 calls {\tt userret} on the trampoline page that is mapped in
 both user and kernel page tables; the reason is that assembly
 code in {\tt userret} will switch page tables.
@@ -387,9 +387,10 @@ table,
 \lstinline{srcva} in
 \lstinline{pagetable}, yielding
 physical address \lstinline{pa0}.
-The kernel maps each physical RAM address to the corresponding
-kernel virtual address, so
-{\tt copyinstr} can directly copy string bytes from {\tt pa0} to {\tt dst}.
+The kernel's page table maps all of physical RAM 
+at virtual addresses that are equal to the RAM's physical address.
+This allows
+{\tt copyinstr} to directly copy string bytes from {\tt pa0} to {\tt dst}.
 {\tt walkaddr} 
 \lineref{kernel/vm.c:/^walkaddr/}
 checks that the user-supplied virtual address is part of
@@ -401,12 +402,13 @@ kernel to a user-supplied address.
 \section{Traps from kernel space}
 \label{s:ktraps}
 
-Xv6 configures the CPU trap registers somewhat differently depending
-on whether user or kernel code is executing.
-When the kernel is executing on a CPU, the kernel points {\tt stvec}
+Xv6 handles traps from kernel code in a different way
+than traps from user code.
+When entering the kernel, {\tt usertrap} points {\tt stvec}
 to the assembly code at {\tt kernelvec}
 \lineref{kernel/kernelvec.S:/^kernelvec/}.
-Since xv6 is already in the kernel, {\tt kernelvec} can rely
+Since {\tt kernelvec} only executes if
+xv6 was already in the kernel, {\tt kernelvec} can rely
 on {\tt satp} being set to the kernel page table, and on the
 stack pointer referring to a valid kernel stack.
 {\tt kernelvec} pushes all 32 registers onto the stack,
@@ -459,7 +461,7 @@ There's a window of time when the kernel has started executing
 but {\tt stvec} is still set to {\tt uservec}, and it's crucial that 
 no device interrupt occur during that window.
 Luckily the RISC-V always disables interrupts when it starts
-to take a trap, and xv6 doesn't enable them again until
+to take a trap, and {\tt usertrap} doesn't enable them again until
 after it sets {\tt stvec}.
 
 \section{Page-fault exceptions}
@@ -501,10 +503,10 @@ flag is clear, or a mapping whose permission bits
 \lstinline{PTE_U})
 forbid the operation being attempted.
 RISC-V distinguishes three
-kinds of page fault: load page faults (when a load instruction cannot
-translate its virtual address), store page faults (when a store
-instruction cannot translate its virtual address), and instruction
-page faults (when the address in the program counter doesn't translate).  The
+kinds of page fault: load page faults (caused by load instructions),
+store page faults (caused by store instructions),
+and instruction
+page faults (caused by fetches of instructions to be executed).  The
 \lstinline{scause} register indicates the type of the
 page fault and the \indexcode{stval} register contains the address
 that couldn't be translated.
@@ -522,8 +524,8 @@ The kernel changes the relevant PTE in the faulting process's page
 table to point to the copy and to allow writes as well as reads,
 and then resumes the faulting
 process at the instruction that caused the fault. Because the 
-PTE allows writes, the re-executed instruction
-will now execute without a fault. Copy-on-write requires book-keeping
+PTE now allows writes, the re-executed instruction
+will execute without a fault. Copy-on-write requires book-keeping
 to help decide when physical pages can be freed, since each page can
 be referenced by a varying number of page tables depending on the history of
 forks, page faults, execs, and exits. This book-keeping allows
@@ -569,21 +571,25 @@ the kernel has to allocate and zero 262,144 4096-byte pages.
 Lazy allocation allows this cost
 to be spread over time.  On the other hand, lazy allocation
 incurs the extra
-overhead of page faults, which involve a kernel/user transition.
+overhead of page faults, which involve a user/kernel transition.
 Operating systems can reduce this cost by allocating a batch of 
 consecutive pages per
 page fault instead of one page and by specializing the kernel
 entry/exit code for such page-faults.
 
 Yet another widely-used feature that exploits page faults is
-\indextext{demand paging}.  In \lstinline{exec}, xv6 loads all text
-and data of an application eagerly into memory.  Since applications
-can be large and reading from disk is expensive, this startup cost may
-be noticeable to users: when the user starts a large application from
-the shell, it may take a long time before user sees a response.  To
-improve response time, a modern kernel creates the page table for the
-user address space, but marks the PTEs for the pages invalid.  On a
-page fault, the kernel reads the content of the page from disk and
+\indextext{demand paging}.  In \lstinline{exec}, xv6 loads all 
+of an application's text
+and data into memory before starting
+the application.  Since applications
+can be large and reading from disk takes time, this startup cost can
+be noticeable to users. To
+decrease startup time, a modern kernel doesn't initially load
+the executable file into memory, but just creates the user page table with
+all PTEs marked invalid. The kernel starts the program running;
+each time the program uses a page for the first time, a page
+fault occurs, and in response
+the kernel reads the content of the page from disk and
 maps it into the user address space.  Like COW fork and lazy
 allocation, the kernel can implement this feature transparently to
 applications.
@@ -621,16 +627,16 @@ page. Thus, when free physical memory is scarce, allocation is
 expensive.
 
 Lazy allocation and demand paging are particularly advantageous when
-free memory is scarce.
-Eagerly allocating memory in
-\lstinline{sbrk} or \lstinline{exec}
-incurs the extra cost of eviction to make memory available.
-Furthermore, there is a risk that the eager work is wasted, because
-before the application uses the page, the operating system may have
-evicted it.
+free memory is scarce and programs actively use only a fraction of
+their allocated memory. These techniques can also avoid the work
+wasted when a page is allocated or loaded but either never used or
+evicted before it can be used.
 
 Other features that combine paging and page-fault exceptions include
-automatically extending stacks and memory-mapped files.
+automatically extending stacks and \indextext{memory-mapped files},
+which are files that a program mapped into its address space using
+the \texttt{mmap} system call so that the program can read and write
+them using load and store instructions.
 
 \section{Real world}
 
@@ -650,7 +656,8 @@ Xv6's trampoline and trapframe exploit these RISC-V features.
 
 The need for special trampoline pages could be eliminated if kernel
 memory were mapped into every process's user page table (with
-appropriate PTE permission flags). That would
+\lstinline{PTE_U} clear).
+That would
 also eliminate the need for a page table switch when trapping from
 user space into the kernel. That in turn would allow system call
 implementations in the kernel to take advantage of the current
@@ -663,14 +670,16 @@ user and kernel virtual addresses don't overlap.
 
 Production operating systems implement copy-on-write fork, lazy
 allocation, demand paging, paging to disk, memory-mapped files, etc.
-Furthermore, production operating systems will try to use all of
-physical memory, either for applications or caches (e.g., the buffer
-cache of the file system, which we will cover later in
-Section~\ref{s:bcache}). Xv6 is na\"{i}ve in this regard: you want
-your operating system to use the physical memory you paid for, but xv6
-doesn't. Furthermore, if xv6 runs out of memory, it returns an error to
-the running application or kills it, instead of, for example, evicting
-a page of another application.
+Furthermore, production operating systems try to store
+something useful in all areas of physical memory, typically caching
+file content in memory that isn't used by processes.
+
+Production operating systems also provide applications with system
+calls to manage their address spaces and implement their own
+page-fault handling through the {\tt mmap}, {\tt munmap}, and {\tt
+  sigaction} system calls, as well as providing calls to pin memory
+into RAM (see {\tt mlock}) and to advise the kernel how an application
+plans to use its memory (see {\tt madvise}).
 
 \section{Exercises}
 
@@ -695,5 +704,7 @@ a page of another application.
 
 \item Could xv6 be modified to eliminate the special {\tt
   TRAMPOLINE} page mapping?
+
+\item Implement {\tt mmap}.
 
 \end{enumerate}
